@@ -1,0 +1,84 @@
+How Canva Migrated 100M+ MAU Data with Zero Downtime Using DMS
+
+For someone who doesn’t know, Canva’s Creators program lets designers publish templates and earn royalties.
+
+With 400k+ templates and a 100% YoY MAU increase, they faced challenges managing 100M+ MAUs on AWS RDS, storing 100s of GBs of royalty data.
+
+Any disruption could cause delayed or inaccurate payments.
+
+To manage this, they had to split the system and handle the data migration.
+Zero-downtime migration:
+
+As part of Canva's migration strategy, they built a new service to shadow the existing system, like a blue-green deployment.
+
+This allowed them to test the new system without impacting production.
+
+The migration process was:
+
+    Pause data processing in the new service while users read from the old database.
+
+    Snapshot the old database.
+
+    Migrate data to the new service.
+
+    Replay and merge queued messages.
+
+    Switch user traffic to the new service without disruption.
+
+![alt text](image3.5afb5cae__1___1_.avif)
+The migration process seemed solid but had some assumptions.
+
+How did Canva ensure no data loss during the pause?
+
+    Queuing system: AWS SQS holds messages for 14 days while processing handlers stop. At-least-once delivery ensures no data loss, though duplicates may happen.
+
+    Background tasks: Periodic data transformations were paused using feature flags.
+
+After migration, queued messages were merged with point-in-time data using a deduplication process, ensuring each usage was counted once and removing any duplicates created during the pause.
+
+Point-in-time Migration:
+
+Canva migrated 8 tables, totaling over 1TB of data. For the largest table, only the last 100 GB were migrated, with older data archived for later use.
+
+AWS Database Migration Service (DMS) 
+
+Canva found AWS DMS closer to their production environment, supporting migrations between databases like AWS RDS.
+
+Key features considered:
+
+    Source filters: Migrated only recent data, making the process efficient.
+
+    Truncate tables: Automatically truncated test data in the new RDS instance.
+
+    Transformation rules: Renamed schemas for compatibility between old and new services.
+
+    Validation: Ensured data was migrated without loss or corruption.
+
+    Parallel loads: Available for faster migrations but wasn’t necessary for their timeframe.
+
+Running point-in-time migration with AWS DMS:
+
+AWS DMS was first tested in pre-production to check infrastructure, integration, and configuration. Despite smaller data in dev and staging, identified and fixed configuration issues.
+Database performance:
+
+Initially, replication ran smoothly, but alarms later revealed performance issues in the primary RDS due to a lack of burst capacity, slowing down DMS replication.
+
+The first suspicion was DMS, but it wasn’t the cause, as parallel replication shouldn’t have affected burst capacity.
+
+After checking key metrics like IOPS and CPU usage, it was found that:
+
+    The new RDS was handling more write operations, making it busier.
+
+    High CPU usage indicated heavy resource consumption due to indexing.
+
+Ref: Canva Engineering Blog
+
+The table indexes caused migration issues, so the following steps were taken to improve speed:
+
+1. Drop and Recreate Indexes: Improving burst balance and speeding up replication.
+
+2. Increase Burst Balance: Upgraded RDS to gp3 for higher IOPS, which helped during index rebuilding post-migration, speeding up the process.
+
+After these changes, the migration completed smoothly.
+
+AWS DMS verification confirmed successful migration, and the process took about a day.
